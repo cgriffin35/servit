@@ -3,16 +3,21 @@ package main
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/cgriffin35/servit/internal/middleware"
 	"github.com/cgriffin35/servit/internal/proxy"
 	"github.com/cgriffin35/servit/internal/tunnel"
 	"github.com/cgriffin35/servit/internal/websocket"
+	"github.com/cgriffin35/servit/pkg/config"
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 )
 
 func main() {
+	cfg := config.Load()
+
 	// Initialize core components
 	tunnelManager := tunnel.NewManager()
 	wsHandler := websocket.NewHandler(tunnelManager)
@@ -20,6 +25,8 @@ func main() {
 
 	// Set up router
 	router := mux.NewRouter()
+	router.Use(middleware.Recovery)
+	router.Use(middleware.RateLimit(100))
 
 	// WebSocket endpoint for tunnel connections
 	router.HandleFunc("/tunnel", wsHandler.HandleConnection)
@@ -30,10 +37,22 @@ func main() {
 
 	// Add CORS for development
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedOrigins:   []string{"https://" + cfg.Domain, "https://*." + cfg.Domain},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"*"},
+		AllowCredentials: true,
+		MaxAge:           86400,
 	})
 	handler := c.Handler(router)
+
+	// Configure server timeouts
+	server := &http.Server{
+		Addr:         ":" + strconv.Itoa(cfg.Port),
+		Handler:      handler,
+		ReadTimeout:  time.Duration(cfg.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(cfg.WriteTimeout) * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 
 	// Start health check routine
 	go func() {
@@ -44,6 +63,6 @@ func main() {
 	}()
 
 	// Start server
-	log.Println("Tunnel server starting on :8080")
-	log.Fatal(http.ListenAndServe("0.0.0.0:8080", handler))
+	log.Printf("Server starting on port %d for domain %s", cfg.Port, cfg.Domain)
+	log.Fatal(server.ListenAndServe())
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cgriffin35/servit/internal/tunnel"
@@ -21,7 +22,9 @@ func NewHandler(tm *tunnel.Manager) *Handler {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				// For development, allow all origins. Restrict in production!
-				return true
+				origin := r.Header.Get("Origin")
+        return strings.HasSuffix(origin, "servit.app") || 
+               strings.HasSuffix(origin, ".servit.app")
 			},
 		},
 	}

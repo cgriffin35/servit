@@ -3,8 +3,10 @@ package proxy
 import (
 	"encoding/base64"
 	"io"
+	"os"
 
 	"log"
+	"log/syslog"
 	"net/http"
 	"time"
 
@@ -20,6 +22,16 @@ type Handler struct {
 	timeout       time.Duration
 }
 
+func setupLogger() *log.Logger {
+	// For production, log to syslog
+	logger, err := syslog.NewLogger(syslog.LOG_INFO, 0)
+	if err != nil {
+			// Fallback to stdout
+			return log.New(os.Stdout, "TUNNEL: ", log.Ldate|log.Ltime|log.Lshortfile)
+	}
+	return logger
+}
+
 func NewHandler(tm *tunnel.Manager) *Handler {
 	return &Handler{
 		tunnelManager: tm,
@@ -28,32 +40,24 @@ func NewHandler(tm *tunnel.Manager) *Handler {
 }
 
 func (h *Handler) HandleRequest(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	vars := mux.Vars(r)
 	tunnelID := vars["tunnelId"]
-	path := vars["path"]
-
-	log.Printf("HTTP Request received: Method=%s, URL=%s, TunnelID=%s, Path=%s",
-		r.Method, r.URL.String(), tunnelID, path)
 
 	tunnelConn, exists := h.tunnelManager.GetTunnel(tunnelID)
 	if !exists {
-		log.Printf("Tunnel NOT found: %s", tunnelID)
 		http.Error(w, "Tunnel not found", http.StatusNotFound)
 		return
 	}
 
-	log.Printf("Tunnel found: %s", tunnelID)
 
 	// Create response channel
 	responseChan := make(tunnel.ResponseChannel, 1)
 	requestID, err := utils.GenerateRequestID()
 	if err != nil {
-		log.Printf("Failed to generate request ID: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	log.Printf("Created response channel for request: %s", requestID)
 
 	// Store the channel for this request
 	tunnelConn.ActiveRequests.Store(requestID, responseChan)
@@ -62,18 +66,14 @@ func (h *Handler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// Serialize and send request
 	proxyReq, err := h.serializeHTTPRequest(r, requestID)
 	if err != nil {
-		log.Printf("Failed to serialize request: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	log.Printf("Sending request to tunnel: %s", proxyReq.RequestID)
 
 	// Reset the deadline after successful write
 	tunnelConn.WSConn.SetWriteDeadline(time.Time{})
 
 	if err := tunnelConn.WSConn.WriteJSON(proxyReq); err != nil {
-		log.Printf("WebSocket write failed: %v", err)
 
 		// Send proper WebSocket close message before removing
 		closeMsg := websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Tunnel connection failed")
@@ -87,13 +87,9 @@ func (h *Handler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Waiting for response for request: %s (timeout: 30s)", requestID)
-
 	// Wait for response with timeout
 	select {
 	case response := <-responseChan:
-		log.Printf("✅ SUCCESS: Received response for request: %s, Status: %d",
-			response.RequestID, response.StatusCode)
 
 		// Write response back to HTTP client
 		for key, values := range response.Headers {
@@ -108,7 +104,6 @@ func (h *Handler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			// Decode base64 content
 			decoded, err := base64.StdEncoding.DecodeString(response.Body)
 			if err != nil {
-				log.Printf("Failed to decode base64: %v", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 				return
 			}
@@ -119,9 +114,15 @@ func (h *Handler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case <-time.After(30 * time.Second):
-		log.Printf("❌ TIMEOUT: No response received for request: %s", requestID)
 		http.Error(w, "Request timeout", http.StatusGatewayTimeout)
 	}
+
+	log.Printf("HTTP %s %s %s %d %v", 
+        r.Method, 
+        r.URL.Path, 
+        r.RemoteAddr, 
+				r.Response.StatusCode, 
+        time.Since(start))
 }
 
 func (h *Handler) serializeHTTPRequest(r *http.Request, requestID string) (*tunnel.ProxyRequest, error) {
