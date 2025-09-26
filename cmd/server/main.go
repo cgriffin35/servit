@@ -46,13 +46,13 @@ func main() {
 	handler := c.Handler(router)
 
 	// Configure server timeouts
-	server := &http.Server{
-		Addr:         ":" + strconv.Itoa(cfg.Port),
-		Handler:      handler,
-		ReadTimeout:  time.Duration(cfg.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(cfg.WriteTimeout) * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
+	// server := &http.Server{
+	// 	Addr:         ":" + strconv.Itoa(cfg.Port),
+	// 	Handler:      handler,
+	// 	ReadTimeout:  time.Duration(cfg.ReadTimeout) * time.Second,
+	// 	WriteTimeout: time.Duration(cfg.WriteTimeout) * time.Second,
+	// 	IdleTimeout:  120 * time.Second,
+	// }
 
 	// Start health check routine
 	go func() {
@@ -62,7 +62,12 @@ func main() {
 		}
 	}()
 
+	port := 80
+	addr := ":" + strconv.Itoa(port)
+
+	log.Printf("Server starting on port %d for domain %s", port, cfg.Domain)
+
 	// Start server
 	log.Printf("Server starting on port %d for domain %s", cfg.Port, cfg.Domain)
-	log.Fatal(server.ListenAndServe())
+	log.Fatal(http.ListenAndServe(addr, handler))
 }

@@ -15,7 +15,7 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		Port:         getEnvInt("PORT", 8080),
+		Port:         getEnvInt("PORT", 80),
 		Domain:       getEnv("DOMAIN", "servit.app"),
 		LogLevel:     getEnv("LOG_LEVEL", "info"),
 		ReadTimeout:  getEnvInt("READ_TIMEOUT", 30),
