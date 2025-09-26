@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/cgriffin35/servit/internal/tunnel"
 	"github.com/gorilla/websocket"
@@ -22,10 +21,31 @@ func NewHandler(tm *tunnel.Manager) *Handler {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				origin := r.Header.Get("Origin")
-				return strings.Contains(origin, "localhost") ||
-					strings.Contains(origin, "127.0.0.1") ||
-					strings.HasSuffix(origin, "servit.app") ||
-					strings.HasSuffix(origin, ".servit.app")
+
+				// Allow your production domain and localhost for testing
+				allowedOrigins := []string{
+					"https://servit.app",
+					"https://www.servit.app",
+					"https://*.servit.app",
+					"http://localhost",
+					"http://127.0.0.1",
+					"ws://localhost",
+					"ws://127.0.0.1",
+				}
+
+				for _, allowed := range allowedOrigins {
+					if origin == allowed || strings.HasSuffix(origin, allowed) {
+						return true
+					}
+				}
+
+				// Also allow requests without Origin header (like websocat)
+				if origin == "" {
+					return true
+				}
+
+				log.Printf("CORS blocked origin: %s", origin)
+				return false
 			},
 		},
 	}
@@ -56,17 +76,6 @@ func (h *Handler) HandleConnection(w http.ResponseWriter, r *http.Request) {
 
 	tunnelConn := h.tunnelManager.RegisterTunnel(registerMsg.TunnelID, conn)
 	log.Printf("Tunnel registered: %s", tunnelConn.ID)
-
-	conn.SetPingHandler(func(message string) error {
-		log.Printf("Received ping from client %s", tunnelConn.ID)
-		return conn.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(time.Second))
-	})
-
-	// Set up pong handler
-	conn.SetPongHandler(func(message string) error {
-		log.Printf("Received pong from client %s", tunnelConn.ID)
-		return nil
-	})
 
 	// Listen for responses from the client
 	for {
