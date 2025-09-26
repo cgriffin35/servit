@@ -21,10 +21,11 @@ func NewHandler(tm *tunnel.Manager) *Handler {
 		tunnelManager: tm,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				// For development, allow all origins. Restrict in production!
 				origin := r.Header.Get("Origin")
-        return strings.HasSuffix(origin, "servit.app") || 
-               strings.HasSuffix(origin, ".servit.app")
+				return strings.Contains(origin, "localhost") ||
+					strings.Contains(origin, "127.0.0.1") ||
+					strings.HasSuffix(origin, "servit.app") ||
+					strings.HasSuffix(origin, ".servit.app")
 			},
 		},
 	}
